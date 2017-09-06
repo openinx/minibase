@@ -1,0 +1,16 @@
+/.externalToolBuilders
+.project
+*.settings/
+.classpath
+/build
+/.idea/
+/logs
+*target/
+*.orig
+*~
+hbase-*/test
+*.iws
+*.iml
+*.ipr
+patchprocess/
+dependency-reduced-pom.xml
