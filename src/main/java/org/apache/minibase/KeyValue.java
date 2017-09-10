@@ -3,7 +3,7 @@ package org.apache.minibase;
 import java.io.IOException;
 import java.util.Comparator;
 
-public class KeyValue {
+public class KeyValue implements Comparable<KeyValue> {
 
   public static final int KEY_LEN = 4;
   public static final int VAL_LEN = 4;

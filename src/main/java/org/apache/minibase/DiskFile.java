@@ -1,17 +1,22 @@
 package org.apache.minibase;
 
+import org.apache.minibase.MiniBase.Iter;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileDescriptor;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
-public class DiskFile {
+public class DiskFile implements Closeable {
 
   public static final int BLOCK_SIZE_UP_LIMIT = 1024 * 1024 * 2;
   public static final int BLOOM_FILTER_HASH_COUNT = 3;
@@ -21,6 +26,10 @@ public class DiskFile {
   // (8B)
   public static final int TRAILER_SIZE = 8 + 4 + 8 + 8 + 8;
   public static final long DISK_FILE_MAGIC = 0xFAC881234221FFA9L;
+
+  private String fname;
+  private RandomAccessFile in;
+  private SortedSet<BlockMeta> blockMetaSet = new TreeSet<>();
 
   private long fileSize;
   private int blockCount;
@@ -33,6 +42,15 @@ public class DiskFile {
       byte[] result = Bytes.toBytes(Bytes.toBytes(offset), Bytes.toBytes(size));
       byte[] bloomFilterWithSize = Bytes.toBytes(Bytes.toBytes(bloomFilter.length), bloomFilter);
       return Bytes.toBytes(result, bloomFilterWithSize);
+    }
+
+    public static BlockMeta parseFrom(byte[] buffer, int bufferOffset) throws IOException {
+      KeyValue kv = KeyValue.parseFrom(buffer, bufferOffset);
+      long offset = Bytes.toLong(Bytes.slice(kv.getValue(), 0, 8));
+      long size = Bytes.toLong(Bytes.slice(kv.getValue(), 0 + 8, 8));
+      int bloomFilterSize = Bytes.toInt(Bytes.slice(kv.getValue(), 0 + 8 + 8, 4));
+      byte[] bloomFilter = Bytes.slice(kv.getValue(), 0 + 8 + 8 + 4, bloomFilterSize);
+      return new BlockMeta(kv.getKey(), offset, size, bloomFilter);
     }
 
     private long offset;
@@ -81,10 +99,6 @@ public class DiskFile {
       assert pos == totalBytes;
       return buffer;
     }
-  }
-
-  public static class BlockIndexReader {
-
   }
 
   public static class BlockWriter {
@@ -226,7 +240,7 @@ public class DiskFile {
 
       File f = new File(this.fname);
       f.createNewFile();
-      out = new FileOutputStream(f);
+      out = new FileOutputStream(f, true);
       currentOffset = 0;
       indexWriter = new BlockIndexWriter();
       currentWriter = new BlockWriter();
@@ -237,7 +251,7 @@ public class DiskFile {
 
       byte[] buffer = currentWriter.serialize();
       out.write(buffer);
-      indexWriter.append(currentWriter.getLastKV(), currentOffset, currentWriter.size(),
+      indexWriter.append(currentWriter.getLastKV(), currentOffset, buffer.length,
         currentWriter.getBloomFilter());
 
       currentOffset += buffer.length;
@@ -308,6 +322,114 @@ public class DiskFile {
           out.close();
         }
       }
+    }
+  }
+
+  public void open(String filename) throws IOException {
+    this.fname = filename;
+
+    File f = new File(fname);
+    this.in = new RandomAccessFile(f, "r");
+
+    this.fileSize = f.length();
+    assert fileSize > TRAILER_SIZE;
+    in.seek(fileSize - TRAILER_SIZE);
+
+    byte[] buffer = new byte[8];
+    assert in.read(buffer) == buffer.length;
+    assert this.fileSize == Bytes.toLong(buffer);
+
+    buffer = new byte[4];
+    assert in.read(buffer) == buffer.length;
+    this.blockCount = Bytes.toInt(buffer);
+
+    buffer = new byte[8];
+    assert in.read(buffer) == buffer.length;
+    this.blockIndexOffset = Bytes.toLong(buffer);
+
+    buffer = new byte[8];
+    assert in.read(buffer) == buffer.length;
+    this.blockIndexSize = Bytes.toLong(buffer);
+
+    buffer = new byte[8];
+    assert in.read(buffer) == buffer.length;
+    assert DISK_FILE_MAGIC == Bytes.toLong(buffer);
+
+    // TODO Maybe a large memory, and overflow
+    buffer = new byte[(int) blockIndexSize];
+    in.seek(blockIndexOffset);
+    assert in.read(buffer) == blockIndexSize;
+
+    // TODO offset may overflow.
+    int offset = 0;
+
+    do {
+      BlockMeta meta = BlockMeta.parseFrom(buffer, offset);
+      offset += meta.size();
+      blockMetaSet.add(meta);
+    } while (offset < buffer.length);
+
+    assert blockMetaSet.size() == this.blockCount : "blockMetaSet.size:" + blockMetaSet.size()
+        + ", blockCount: " + blockCount;
+  }
+
+  private BlockReader load(BlockMeta meta) throws IOException {
+    in.seek(meta.getOffset());
+
+    // TODO Maybe overflow.
+    byte[] buffer = new byte[(int) meta.getSize()];
+
+    assert in.read(buffer) == buffer.length;
+    return BlockReader.parseFrom(buffer, 0, buffer.length);
+  }
+
+  private class InternalIterator implements Iter<KeyValue> {
+
+    private int currentKVIndex = 0;
+    private BlockReader currentReader;
+    private Iterator<BlockMeta> blockMetaIter;
+
+    public InternalIterator() {
+      currentReader = null;
+      blockMetaIter = blockMetaSet.iterator();
+    }
+
+    private boolean nextBlockReader() throws IOException {
+      if (blockMetaIter.hasNext()) {
+        currentReader = load(blockMetaIter.next());
+        currentKVIndex = 0;
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    @Override
+    public boolean hasNext() throws IOException {
+      if (currentReader == null) {
+        return nextBlockReader();
+      } else {
+        if (currentKVIndex < currentReader.getKeyValues().size()) {
+          return true;
+        } else {
+          return nextBlockReader();
+        }
+      }
+    }
+
+    @Override
+    public KeyValue next() throws IOException {
+      return currentReader.getKeyValues().get(currentKVIndex++);
+    }
+  }
+
+  public Iter<KeyValue> iterator() {
+    return new InternalIterator();
+  }
+
+  public void close() throws IOException {
+    if (in != null) {
+      in.close();
     }
   }
 }

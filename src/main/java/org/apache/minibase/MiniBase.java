@@ -1,9 +1,10 @@
 package org.apache.minibase;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.Set;
 
-public interface MiniBase {
+public interface MiniBase extends Closeable {
 
   public void put(byte[] key, byte[] value) throws IOException;
 
@@ -11,7 +12,17 @@ public interface MiniBase {
 
   public void delete(byte[] key) throws IOException;
 
-  public Iterator<KeyValue> scan(byte[] start, byte[] stop) throws IOException;
+  public Iter<KeyValue> scan(byte[] start, byte[] stop) throws IOException;
 
-  public Iterator<KeyValue> scan() throws IOException;
+  public Iter<KeyValue> scan() throws IOException;
+
+  public static interface Flusher {
+    public void flush(Set<KeyValue> kvSet) throws IOException;
+  }
+
+  public interface Iter<KeyValue> {
+    public boolean hasNext() throws IOException;
+
+    public KeyValue next() throws IOException;
+  }
 }

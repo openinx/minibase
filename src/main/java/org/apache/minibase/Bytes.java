@@ -1,8 +1,6 @@
 package org.apache.minibase;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.nio.charset.Charset;
 
 public class Bytes {
   public static byte[] toBytes(byte b) {
@@ -25,14 +23,10 @@ public class Bytes {
 
   public static byte[] toBytes(long x) {
     byte[] b = new byte[8];
-    b[7] = (byte) (x & 0xFF);
-    b[6] = (byte) ((x >> 8) & 0xFF);
-    b[5] = (byte) ((x >> 16) & 0xFF);
-    b[4] = (byte) ((x >> 24) & 0xFF);
-    b[3] = (byte) ((x >> 32) & 0xFF);
-    b[2] = (byte) ((x >> 40) & 0xFF);
-    b[1] = (byte) ((x >> 48) & 0xFF);
-    b[0] = (byte) ((x >> 56) & 0xFF);
+    for (int i = 7; i >= 0; i--) {
+      int j = (7 - i) << 3;
+      b[i] = (byte) ((x >> j) & 0xFF);
+    }
     return b;
   }
 
@@ -67,7 +61,8 @@ public class Bytes {
       throw new IOException("Invalid offset: " + offset + " or len: " + len);
     }
     if (offset + len > buf.length) {
-      throw new IOException("buffer overflow, offset: " + offset + ", len: " + len);
+      throw new IOException("Buffer overflow, offset: " + offset + ", len: " + len
+          + ", buf.length:" + buf.length);
     }
     byte[] result = new byte[len];
     System.arraycopy(buf, offset, result, 0, len);
