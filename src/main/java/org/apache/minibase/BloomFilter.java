@@ -11,17 +11,10 @@ public class BloomFilter {
     this.bitsPerKey = bitsPerKey;
   }
 
-  public BloomFilter(int k, int bitsPerKey, byte[] result) {
-    this.k = k;
-    this.bitsPerKey = bitsPerKey;
-    this.bitLen = result.length;
-    this.result = result;
-  }
-
   public byte[] generate(byte[][] keys) {
     assert keys != null;
     bitLen = keys.length * bitsPerKey;
-    bitLen = ((bitLen + 7) / 8) << 3;
+    bitLen = ((bitLen + 7) / 8) << 3; // align the bitLen.
     bitLen = bitLen < 64 ? 64 : bitLen;
     result = new byte[bitLen >> 3];
     for (int i = 0; i < keys.length; i++) {

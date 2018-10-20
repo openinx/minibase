@@ -1,5 +1,6 @@
 package org.apache.minibase;
 
+import org.apache.minibase.DiskStore.DefaultCompactor;
 import org.apache.minibase.DiskStore.DefaultFlusher;
 import org.apache.minibase.DiskStore.MultiIter;
 
@@ -10,11 +11,16 @@ import java.util.List;
 public class MiniBaseImpl implements MiniBase {
 
   private static final String DEFAULT_DATA_DIR = "MiniBase";
+
   private String dataDir = DEFAULT_DATA_DIR;
   private long maxMemStoreSize = 256 * 1024 * 1024L;
 
+  private int MAX_DISK_FILES = 10;
+  private int maxDiskFiles = MAX_DISK_FILES;
+
   private MemStore memStore;
   private DiskStore diskStore;
+  private Compactor compactor;
 
   public MiniBaseImpl setDataDir(String datDir) {
     this.dataDir = datDir;
@@ -26,12 +32,20 @@ public class MiniBaseImpl implements MiniBase {
     return this;
   }
 
+  public MiniBaseImpl setMaxDiskFiles(int maxDiskFiles) {
+    this.maxDiskFiles = maxDiskFiles;
+    return this;
+  }
+
   public MiniBase open() throws IOException {
-    diskStore = new DiskStore(this.dataDir);
+    diskStore = new DiskStore(this.dataDir, maxDiskFiles);
     diskStore.open();
 
     memStore = new MemStore(maxMemStoreSize, new DefaultFlusher(diskStore));
     memStore.start();
+
+    compactor = new DefaultCompactor(diskStore);
+    compactor.start();
     return this;
   }
 
@@ -69,5 +83,6 @@ public class MiniBaseImpl implements MiniBase {
     memStore.flush();
     memStore.close();
     diskStore.close();
+    compactor.interrupt();
   }
 }

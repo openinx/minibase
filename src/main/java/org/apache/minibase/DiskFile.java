@@ -373,6 +373,10 @@ public class DiskFile implements Closeable {
         + ", blockCount: " + blockCount;
   }
 
+  public String getFileName() {
+    return fname;
+  }
+
   private BlockReader load(BlockMeta meta) throws IOException {
     in.seek(meta.getOffset());
 

@@ -1,5 +1,6 @@
 package org.apache.minibase;
 
+import org.apache.log4j.Logger;
 import org.apache.minibase.DiskStore.MultiIter;
 import org.apache.minibase.MiniBase.Flusher;
 import org.apache.minibase.MiniBase.Iter;
@@ -15,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MemStore extends Thread implements Closeable {
+
+  private static final Logger LOG = Logger.getLogger(MemStore.class);
 
   public static final long MAX_MEMSTORE_SIZE = 256 * 1024 * 1024L;
 
@@ -81,7 +84,7 @@ public class MemStore extends Thread implements Closeable {
             flusher.flush(snapshot);
           }
         } catch (IOException e) {
-          e.printStackTrace(); // TODO use log
+          LOG.error("MemStore flush failed: ", e);
         } finally {
           synchronized (snapshotExists) {
             if (snapshotExists.compareAndSet(true, false)) {

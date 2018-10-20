@@ -20,6 +20,10 @@ public interface MiniBase extends Closeable {
     public void flush(Set<KeyValue> kvSet) throws IOException;
   }
 
+  public static abstract class Compactor extends Thread {
+    public abstract void compact(boolean isMajor) throws IOException;
+  }
+
   public interface Iter<KeyValue> {
     public boolean hasNext() throws IOException;
 

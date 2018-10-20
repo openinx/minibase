@@ -1,30 +1,41 @@
 package org.apache.minibase;
 
+import org.apache.log4j.Logger;
 import org.apache.minibase.DiskFile.DiskFileWriter;
+import org.apache.minibase.MiniBase.Compactor;
 import org.apache.minibase.MiniBase.Flusher;
 import org.apache.minibase.MiniBase.Iter;
 
 import java.io.Closeable;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class DiskStore implements Closeable {
 
+  private static final Logger LOG = Logger.getLogger(DiskStore.class);
+  private static final String FILE_NAME_TMP_SUFFIX = ".tmp";
+  private static final String FILE_NAME_ARCHIVE_SUFFIX = ".archive";
   private static final Pattern DATA_FILE_RE = Pattern.compile("data\\.([0-9]+)"); // data.1
+
   private String dataDir;
   private List<DiskFile> diskFiles;
 
-  public DiskStore(String dataDir) {
+  private int maxDiskFiles;
+  private volatile AtomicLong maxFileId;
+
+  public DiskStore(String dataDir, int maxDiskFiles) {
     this.dataDir = dataDir;
     this.diskFiles = new ArrayList<>();
+    this.maxDiskFiles = maxDiskFiles;
   }
 
   private File[] listDiskFiles() {
@@ -32,20 +43,27 @@ public class DiskStore implements Closeable {
     return f.listFiles(fname -> DATA_FILE_RE.matcher(fname.getName()).matches());
   }
 
-  public synchronized long nextDiskFileId() {
+  public synchronized long getMaxDiskId() {
+    // TODO can we save the maxFileId ? and next time, need not to traverse the disk file.
     File[] files = listDiskFiles();
-    long maxFileId = 0;
+    long maxFileId = -1L;
     for (File f : files) {
       Matcher matcher = DATA_FILE_RE.matcher(f.getName());
       if (matcher.matches()) {
         maxFileId = Math.max(Long.parseLong(matcher.group(1)), maxFileId);
       }
     }
-    return maxFileId + 1;
+    return maxFileId;
   }
 
-  public synchronized void addDiskFile(DiskFile df) {
-    diskFiles.add(df);
+  public synchronized long nextDiskFileId() {
+    return maxFileId.incrementAndGet();
+  }
+
+  public void addDiskFile(DiskFile df) {
+    synchronized (diskFiles) {
+      diskFiles.add(df);
+    }
   }
 
   public synchronized void addDiskFile(String filename) throws IOException {
@@ -65,6 +83,17 @@ public class DiskStore implements Closeable {
       df.open(f.getAbsolutePath());
       diskFiles.add(df);
     }
+    maxFileId = new AtomicLong(getMaxDiskId());
+  }
+
+  public List<DiskFile> getDiskFiles() {
+    synchronized (diskFiles) {
+      return new ArrayList<>(diskFiles);
+    }
+  }
+
+  public long getMaxDiskFiles() {
+    return this.maxDiskFiles;
   }
 
   @Override
@@ -84,7 +113,9 @@ public class DiskStore implements Closeable {
 
   public Iter<KeyValue> iterator() throws IOException {
     List<Iter<KeyValue>> iters = new ArrayList<>();
-    diskFiles.stream().forEach(df -> iters.add(df.iterator()));
+    for (DiskFile df : getDiskFiles()) {
+      iters.add(df.iterator());
+    }
     return new MultiIter(iters);
   }
 
@@ -98,7 +129,7 @@ public class DiskStore implements Closeable {
     @Override
     public void flush(Set<KeyValue> kvSet) throws IOException {
       String fileName = diskStore.getNextDiskFileName();
-      String fileTempName = diskStore.getNextDiskFileName() + ".tmp";
+      String fileTempName = fileName + FILE_NAME_TMP_SUFFIX;
       try {
         try (DiskFileWriter writer = new DiskFileWriter(fileTempName)) {
           for (Iterator<KeyValue> it = kvSet.iterator(); it.hasNext();) {
@@ -119,6 +150,91 @@ public class DiskStore implements Closeable {
           f.delete();
         }
       }
+    }
+  }
+
+  public static class DefaultCompactor extends Compactor {
+    private DiskStore diskStore;
+    private volatile boolean running = true;
+
+    public DefaultCompactor(DiskStore diskStore) {
+      this.diskStore = diskStore;
+      this.setDaemon(true);
+    }
+
+    public void minorCompact() throws IOException {
+      // TODO implement the minor compaction.
+    }
+
+    private void majorCompact() throws IOException {
+      String fileName = diskStore.getNextDiskFileName();
+      String fileTempName = fileName + FILE_NAME_TMP_SUFFIX;
+      try {
+        try (DiskFileWriter writer = new DiskFileWriter(fileTempName)) {
+          for (Iter<KeyValue> it = diskStore.iterator(); it.hasNext();) {
+            writer.append(it.next());
+          }
+          writer.appendIndex();
+          writer.appendTrailer();
+        }
+        File f = new File(fileTempName);
+        if (!f.renameTo(new File(fileName))) {
+          throw new IOException("Rename " + fileTempName + " to " + fileName + " failed");
+        }
+
+        // Rename the data files to archive files.
+        // TODO when rename the files, will we effect the scan ?
+        diskStore.close();
+        diskStore.getDiskFiles().stream().forEach(df -> {
+          File file = new File(df.getFileName());
+          File archiveFile = new File(df.getFileName() + FILE_NAME_ARCHIVE_SUFFIX);
+          if (!file.renameTo(archiveFile)) {
+            LOG.error("Rename " + df.getFileName() + " to " + archiveFile.getName() + " failed.");
+          }
+        });
+
+        // TODO any concurrent issue ?
+        diskStore.addDiskFile(fileName);
+      } finally {
+        File f = new File(fileTempName);
+        if (f.exists()) {
+          f.delete();
+        }
+      }
+    }
+
+    @Override
+    public void compact(boolean isMajor) throws IOException {
+      if (isMajor) {
+        majorCompact();
+      } else {
+        minorCompact();
+      }
+    }
+
+    public void run() {
+      while (running) {
+        try {
+          boolean isCompacted = false;
+          if (diskStore.getDiskFiles().size() > diskStore.getMaxDiskFiles()) {
+            majorCompact();
+            isCompacted = true;
+          }
+          if (!isCompacted) {
+            Thread.sleep(1000);
+          }
+        } catch (IOException e) {
+          e.printStackTrace();
+          LOG.error("Major compaction failed: ", e);
+        } catch (InterruptedException ie) {
+          LOG.error("InterruptedException happened, stop running: ", ie);
+          break;
+        }
+      }
+    }
+
+    public void stopRunning() {
+      this.running = false;
     }
   }
 
