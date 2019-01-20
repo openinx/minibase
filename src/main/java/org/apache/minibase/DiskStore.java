@@ -10,11 +10,9 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.Collection;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -92,6 +90,12 @@ public class DiskStore implements Closeable {
     }
   }
 
+  public void removeDiskFiles(Collection<DiskFile> files) {
+    synchronized (diskFiles) {
+      diskFiles.removeAll(files);
+    }
+  }
+
   public long getMaxDiskFiles() {
     return this.maxDiskFiles;
   }
@@ -111,12 +115,14 @@ public class DiskStore implements Closeable {
     }
   }
 
-  public Iter<KeyValue> iterator() throws IOException {
+  public Iter<KeyValue> createIterator(List<DiskFile> diskFiles) throws IOException {
     List<Iter<KeyValue>> iters = new ArrayList<>();
-    for (DiskFile df : getDiskFiles()) {
-      iters.add(df.iterator());
-    }
+    diskFiles.forEach(df -> iters.add(df.iterator()));
     return new MultiIter(iters);
+  }
+
+  public Iter<KeyValue> createIterator() throws IOException {
+    return createIterator(getDiskFiles());
   }
 
   public static class DefaultFlusher implements Flusher {
@@ -127,12 +133,12 @@ public class DiskStore implements Closeable {
     }
 
     @Override
-    public void flush(Set<KeyValue> kvSet) throws IOException {
+    public void flush(Iter<KeyValue> it) throws IOException {
       String fileName = diskStore.getNextDiskFileName();
       String fileTempName = fileName + FILE_NAME_TMP_SUFFIX;
       try {
         try (DiskFileWriter writer = new DiskFileWriter(fileTempName)) {
-          for (Iterator<KeyValue> it = kvSet.iterator(); it.hasNext();) {
+          while (it.hasNext()) {
             writer.append(it.next());
           }
           writer.appendIndex();
@@ -140,7 +146,8 @@ public class DiskStore implements Closeable {
         }
         File f = new File(fileTempName);
         if (!f.renameTo(new File(fileName))) {
-          throw new IOException("Rename " + fileTempName + " to " + fileName + " failed");
+          throw new IOException(
+              "Rename " + fileTempName + " to " + fileName + " failed when flushing");
         }
         // TODO any concurrent issue ?
         diskStore.addDiskFile(fileName);
@@ -162,16 +169,12 @@ public class DiskStore implements Closeable {
       this.setDaemon(true);
     }
 
-    public void minorCompact() throws IOException {
-      // TODO implement the minor compaction.
-    }
-
-    private void majorCompact() throws IOException {
+    private void performCompact(List<DiskFile> filesToCompact) throws IOException {
       String fileName = diskStore.getNextDiskFileName();
       String fileTempName = fileName + FILE_NAME_TMP_SUFFIX;
       try {
         try (DiskFileWriter writer = new DiskFileWriter(fileTempName)) {
-          for (Iter<KeyValue> it = diskStore.iterator(); it.hasNext();) {
+          for (Iter<KeyValue> it = diskStore.createIterator(filesToCompact); it.hasNext();) {
             writer.append(it.next());
           }
           writer.appendIndex();
@@ -184,14 +187,15 @@ public class DiskStore implements Closeable {
 
         // Rename the data files to archive files.
         // TODO when rename the files, will we effect the scan ?
-        diskStore.close();
-        diskStore.getDiskFiles().stream().forEach(df -> {
+        for (DiskFile df : filesToCompact) {
+          df.close();
           File file = new File(df.getFileName());
           File archiveFile = new File(df.getFileName() + FILE_NAME_ARCHIVE_SUFFIX);
           if (!file.renameTo(archiveFile)) {
             LOG.error("Rename " + df.getFileName() + " to " + archiveFile.getName() + " failed.");
           }
-        });
+        }
+        diskStore.removeDiskFiles(filesToCompact);
 
         // TODO any concurrent issue ?
         diskStore.addDiskFile(fileName);
@@ -204,12 +208,10 @@ public class DiskStore implements Closeable {
     }
 
     @Override
-    public void compact(boolean isMajor) throws IOException {
-      if (isMajor) {
-        majorCompact();
-      } else {
-        minorCompact();
-      }
+    public void compact() throws IOException {
+      List<DiskFile> filesToCompact = new ArrayList<>();
+      filesToCompact.addAll(diskStore.getDiskFiles());
+      performCompact(filesToCompact);
     }
 
     public void run() {
@@ -217,7 +219,7 @@ public class DiskStore implements Closeable {
         try {
           boolean isCompacted = false;
           if (diskStore.getDiskFiles().size() > diskStore.getMaxDiskFiles()) {
-            majorCompact();
+            performCompact(diskStore.getDiskFiles());
             isCompacted = true;
           }
           if (!isCompacted) {
@@ -291,5 +293,4 @@ public class DiskStore implements Closeable {
       return null;
     }
   }
-
 }

@@ -431,6 +431,7 @@ public class DiskFile implements Closeable {
     return new InternalIterator();
   }
 
+  @Override
   public void close() throws IOException {
     if (in != null) {
       in.close();

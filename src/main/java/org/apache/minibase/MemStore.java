@@ -2,6 +2,7 @@ package org.apache.minibase;
 
 import org.apache.log4j.Logger;
 import org.apache.minibase.DiskStore.MultiIter;
+import org.apache.minibase.MiniBase.Flusher;
 import org.apache.minibase.MiniBase.Iter;
 
 import java.io.Closeable;
@@ -12,27 +13,32 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class MemStore implements Closeable {
 
   private static final Logger LOG = Logger.getLogger(MemStore.class);
-  public static final long MAX_FLUSH_SIZE = 16 * 1024 * 1024;
 
-  private final LongAdder dataSize;
+  private final AtomicLong dataSize = new AtomicLong();
 
   private volatile ConcurrentSkipListMap<KeyValue, KeyValue> kvMap;
   private volatile ConcurrentSkipListMap<KeyValue, KeyValue> snapshot;
 
   private final ReentrantReadWriteLock updateLock = new ReentrantReadWriteLock();
   private final AtomicBoolean isSnapshotFlushing = new AtomicBoolean(false);
-  private ExecutorService pool = Executors.newFixedThreadPool(5);
+  private ExecutorService pool;
 
-  public MemStore() {
-    dataSize = new LongAdder();
+  private Config conf;
+  private Flusher flusher;
+
+  public MemStore(Config conf, Flusher flusher, ExecutorService pool) {
+    this.conf = conf;
+    this.flusher = flusher;
+    this.pool = pool;
+
+    dataSize.set(0);
     this.kvMap = new ConcurrentSkipListMap<>();
     this.snapshot = null;
   }
@@ -43,56 +49,76 @@ public class MemStore implements Closeable {
     try {
       KeyValue prevKeyValue;
       if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
-        dataSize.add(kv.getSerializeSize());
+        dataSize.addAndGet(kv.getSerializeSize());
       } else {
-        dataSize.add(kv.getSerializeSize() - prevKeyValue.getSerializeSize());
+        dataSize.addAndGet(kv.getSerializeSize() - prevKeyValue.getSerializeSize());
       }
     } finally {
       updateLock.readLock().unlock();
     }
     flushIfNeeded(false);
   }
-  
+
   private void flushIfNeeded(boolean shouldBlocking) throws IOException {
-    if (getDataSize() > MAX_FLUSH_SIZE) {
-      if (isSnapshotFlushing.get()) {
-        if (shouldBlocking) {
-          throw new IOException("Memstore is full(" + dataSize.sum()
-              + "B), please wait until the flushing is finished.");
-        }
+    if (getDataSize() > conf.getMaxMemstoreSize()) {
+      if (isSnapshotFlushing.get() && shouldBlocking) {
+        throw new IOException(
+            "Memstore is full, currentDataSize=" + dataSize.get() + "B, maxMemstoreSize="
+                + conf.getMaxMemstoreSize() + "B, please wait until the flushing is finished.");
       } else if (isSnapshotFlushing.compareAndSet(false, true)) {
-        pool.submit(new Flusher());
+        pool.submit(new FlusherTask());
       }
     }
   }
 
   public long getDataSize() {
-    return dataSize.sum();
+    return dataSize.get();
+  }
+
+  public boolean isFlushing() {
+    return this.isSnapshotFlushing.get();
   }
 
   @Override
   public void close() throws IOException {
   }
 
-
-  private class Flusher implements Runnable {
-    public Flusher() {
-
-    }
-
+  private class FlusherTask implements Runnable {
     @Override
     public void run() {
       // Step.1 memstore snpashot
       updateLock.writeLock().lock();
       try {
         snapshot = kvMap;
+        // TODO MemStoreIter may find the kvMap changed ? should synchronize ?
         kvMap = new ConcurrentSkipListMap<>();
-        dataSize.reset();
+        dataSize.set(0);
       } finally {
         updateLock.writeLock().unlock();
       }
 
       // Step.2 Flush the memstore to disk file.
+      boolean success = false;
+      for (int i = 0; i < conf.getFlushMaxRetries(); i++) {
+        try {
+          flusher.flush(new IteratorWrapper(snapshot.values().iterator()));
+          success = true;
+        } catch (IOException e) {
+          LOG.error("Failed to flush memstore, retries=" + i + ", maxFlushRetries="
+              + conf.getFlushMaxRetries(),
+            e);
+          if (i >= conf.getFlushMaxRetries()) {
+            break;
+          }
+        }
+      }
+
+      // Step.3 clear the snapshot.
+      if (success) {
+        // TODO MemStoreIter may get a NPE because we set null here ? should synchronize ?
+        snapshot = null;
+        isSnapshotFlushing.compareAndSet(true, false);
+      }
     }
   }
 

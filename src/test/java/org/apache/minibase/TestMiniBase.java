@@ -36,23 +36,34 @@ public class TestMiniBase {
     }
 
     public void run() {
-      try {
-        for (long i = start; i < end; i++) {
-          db.put(Bytes.toBytes(i), Bytes.toBytes(i));
+      for (long i = start; i < end; i++) {
+        int retries = 0;
+        while (retries < 50) {
+          try {
+            db.put(Bytes.toBytes(i), Bytes.toBytes(i));
+            break;
+          } catch (IOException e) {
+            // Memstore maybe full, so let's retry.
+            retries++;
+            try {
+              Thread.sleep(100 * retries);
+            } catch (InterruptedException e1) {
+            }
+          }
         }
-      } catch (IOException e) {
-        e.printStackTrace();
       }
     }
   }
 
   @Test
   public void testPut() throws IOException, InterruptedException {
-    Config conf = new Config().setDataDir(dataDir);
+    // Set maxMemstoreSize to 64B, which make the memstore flush frequently.
+    Config conf = new Config().setDataDir(dataDir).setMaxMemstoreSize(1).setFlushMaxRetries(1)
+        .setMaxDiskFiles(10);
     final MiniBase db = MiniBaseImpl.create(conf).open();
 
-    final long totalKVSize = 10000L; // 10^4
-    final int threadSize = 100;
+    final long totalKVSize = 100L;
+    final int threadSize = 5;
 
     WriterThread[] writers = new WriterThread[threadSize];
     for (int i = 0; i < threadSize; i++) {

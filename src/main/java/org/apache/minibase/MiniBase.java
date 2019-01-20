@@ -2,7 +2,6 @@ package org.apache.minibase;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Set;
 
 public interface MiniBase extends Closeable {
 
@@ -17,11 +16,11 @@ public interface MiniBase extends Closeable {
   Iter<KeyValue> scan() throws IOException;
 
   interface Flusher {
-    void flush(Set<KeyValue> kvSet) throws IOException;
+    void flush(Iter<KeyValue> it) throws IOException;
   }
 
   abstract class Compactor extends Thread {
-    public abstract void compact(boolean isMajor) throws IOException;
+    public abstract void compact() throws IOException;
   }
 
   interface Iter<KeyValue> {
