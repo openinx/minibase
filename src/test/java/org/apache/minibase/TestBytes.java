@@ -6,6 +6,11 @@ import org.junit.Test;
 public class TestBytes {
 
   @Test
+  public void testByte() {
+    Assert.assertArrayEquals(new byte[] { 'a' }, Bytes.toBytes((byte) 'a'));
+  }
+
+  @Test
   public void testInt() {
     Assert.assertEquals(Bytes.toInt(Bytes.toBytes(123455)), 123455);
     Assert.assertEquals(Bytes.toInt(Bytes.toBytes(-1)), -1);
