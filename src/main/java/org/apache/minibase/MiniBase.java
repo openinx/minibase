@@ -11,9 +11,22 @@ public interface MiniBase extends Closeable {
 
   void delete(byte[] key) throws IOException;
 
-  Iter<KeyValue> scan(byte[] start, byte[] stop) throws IOException;
+  /**
+   * Fetch all the key values whose key located in the range [startKey, stopKey)
+   *
+   * @param startKey start key to scan (inclusive), if start is byte[0], it means negative
+   *                 infinity.
+   * @param stopKey  to stop the scan. (exclusive), if stopKey is byte[0], it means positive
+   *                 infinity.
+   * @return Iterator for fetching the key value one by one.
+   */
+  Iter<KeyValue> scan(byte[] startKey, byte[] stopKey) throws IOException;
 
-  Iter<KeyValue> scan() throws IOException;
+  interface Iter<KeyValue> {
+    boolean hasNext() throws IOException;
+
+    KeyValue next() throws IOException;
+  }
 
   interface Flusher {
     void flush(Iter<KeyValue> it) throws IOException;
@@ -21,18 +34,5 @@ public interface MiniBase extends Closeable {
 
   abstract class Compactor extends Thread {
     public abstract void compact() throws IOException;
-  }
-
-  interface Iter<KeyValue> {
-    boolean hasNext() throws IOException;
-
-    KeyValue next() throws IOException;
-
-    /**
-     * Seek to the largest key value which is less than or equal to the target key value.
-     * @param kv target key value to seek
-     * @throws IOException error to throw if fail to read file or memstore.
-     */
-    //void seekTo(KeyValue kv) throws IOException;
   }
 }
