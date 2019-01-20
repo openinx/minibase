@@ -53,24 +53,29 @@ public class MiniBaseImpl implements MiniBase {
     return new MiniBaseImpl();
   }
 
+  @Override
   public void put(byte[] key, byte[] value) throws IOException {
     this.memStore.add(KeyValue.create(key, value));
   }
 
+  @Override
   public byte[] get(byte[] key) throws IOException {
     // TODO
     return new byte[0];
   }
 
+  @Override
   public void delete(byte[] key) throws IOException {
     // TODO
   }
 
+  @Override
   public Iter<KeyValue> scan(byte[] start, byte[] stop) throws IOException {
     // TODO
     return null;
   }
 
+  @Override
   public Iter<KeyValue> scan() throws IOException {
     List<Iter<KeyValue>> iterList = new ArrayList<>();
     iterList.add(memStore.iterator());
