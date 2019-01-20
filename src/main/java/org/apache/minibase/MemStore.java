@@ -2,7 +2,6 @@ package org.apache.minibase;
 
 import org.apache.log4j.Logger;
 import org.apache.minibase.DiskStore.MultiIter;
-import org.apache.minibase.MiniBase.Flusher;
 import org.apache.minibase.MiniBase.Iter;
 
 import java.io.Closeable;
@@ -10,109 +9,95 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.NavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-public class MemStore extends Thread implements Closeable {
+public class MemStore implements Closeable {
 
   private static final Logger LOG = Logger.getLogger(MemStore.class);
+  public static final long MAX_FLUSH_SIZE = 16 * 1024 * 1024;
 
-  public static final long MAX_MEMSTORE_SIZE = 256 * 1024 * 1024L;
+  private final LongAdder dataSize;
 
-  private final AtomicLong memsize;
-  private final AtomicBoolean snapshotExists;
+  private volatile ConcurrentSkipListMap<KeyValue, KeyValue> kvMap;
+  private volatile ConcurrentSkipListMap<KeyValue, KeyValue> snapshot;
 
-  private volatile boolean running = true;
-  private long flushSizeLimit = MAX_MEMSTORE_SIZE;
-  private volatile ConcurrentSkipListSet<KeyValue> kvSet;
-  private volatile ConcurrentSkipListSet<KeyValue> snapshot;
-  private Flusher flusher;
+  private final ReentrantReadWriteLock updateLock = new ReentrantReadWriteLock();
+  private final AtomicBoolean isSnapshotFlushing = new AtomicBoolean(false);
+  private ExecutorService pool = Executors.newFixedThreadPool(5);
 
-  public MemStore(long flushSizeLimit, Flusher flusher) {
-    memsize = new AtomicLong(0);
-    snapshotExists = new AtomicBoolean(false);
-
-    this.flushSizeLimit = flushSizeLimit;
-    this.kvSet = new ConcurrentSkipListSet<>();
+  public MemStore() {
+    dataSize = new LongAdder();
+    this.kvMap = new ConcurrentSkipListMap<>();
     this.snapshot = null;
-    this.flusher = flusher;
-
-    this.setDaemon(true);
-  }
-
-  public MemStore(Flusher flusher) {
-    this(MAX_MEMSTORE_SIZE, flusher);
   }
 
   public void add(KeyValue kv) throws IOException {
-    flush(flushSizeLimit);
-    kvSet.add(kv);
-    memsize.addAndGet(kv.size());
-  }
-
-  private void flush(long limit) throws IOException {
-    while (memsize.get() > limit) {
-      if (snapshotExists.compareAndSet(false, true)) {
-        synchronized (snapshotExists) {
-          snapshot = kvSet;
-          kvSet = new ConcurrentSkipListSet<>();
-          memsize.set(0);
-          snapshotExists.notify();
-          return;
-        }
+    flushIfNeeded(true);
+    updateLock.readLock().lock();
+    try {
+      KeyValue prevKeyValue;
+      if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
+        dataSize.add(kv.getSerializeSize());
+      } else {
+        dataSize.add(kv.getSerializeSize() - prevKeyValue.getSerializeSize());
       }
-      try {
-        Thread.sleep(20);
-      } catch (InterruptedException e) {
-        break;
+    } finally {
+      updateLock.readLock().unlock();
+    }
+    flushIfNeeded(false);
+  }
+  
+  private void flushIfNeeded(boolean shouldBlocking) throws IOException {
+    if (getDataSize() > MAX_FLUSH_SIZE) {
+      if (isSnapshotFlushing.get()) {
+        if (shouldBlocking) {
+          throw new IOException("Memstore is full(" + dataSize.sum()
+              + "B), please wait until the flushing is finished.");
+        }
+      } else if (isSnapshotFlushing.compareAndSet(false, true)) {
+        pool.submit(new Flusher());
       }
     }
   }
 
-  public void flush() throws IOException {
-    flush(0);
-  }
-
-  @Override
-  public void run() {
-    while (running) {
-      if (snapshotExists.get()) {
-        try {
-          if (flusher != null && snapshot != null && snapshot.size() > 0) {
-            flusher.flush(snapshot);
-          }
-        } catch (IOException e) {
-          LOG.error("MemStore flush failed: ", e);
-        } finally {
-          synchronized (snapshotExists) {
-            if (snapshotExists.compareAndSet(true, false)) {
-              snapshot = null;
-            }
-          }
-        }
-      }
-      synchronized (snapshotExists) {
-        try {
-          snapshotExists.wait();
-        } catch (InterruptedException e) {
-          break;
-        }
-      }
-    }
+  public long getDataSize() {
+    return dataSize.sum();
   }
 
   @Override
   public void close() throws IOException {
-    running = false;
-    synchronized (snapshotExists) {
-      snapshotExists.notify();
+  }
+
+
+  private class Flusher implements Runnable {
+    public Flusher() {
+
+    }
+
+    @Override
+    public void run() {
+      // Step.1 memstore snpashot
+      updateLock.writeLock().lock();
+      try {
+        snapshot = kvMap;
+        kvMap = new ConcurrentSkipListMap<>();
+        dataSize.reset();
+      } finally {
+        updateLock.writeLock().unlock();
+      }
+
+      // Step.2 Flush the memstore to disk file.
     }
   }
 
   public Iter<KeyValue> iterator() throws IOException {
-    return new MemStoreIter(kvSet, snapshot);
+    return new MemStoreIter(kvMap, snapshot);
   }
 
   public static class IteratorWrapper implements Iter<KeyValue> {
@@ -138,13 +123,14 @@ public class MemStore extends Thread implements Closeable {
 
     private MultiIter it;
 
-    public MemStoreIter(Set<KeyValue> kvSet, Set<KeyValue> snapshot) throws IOException {
+    public MemStoreIter(NavigableMap<KeyValue, KeyValue> kvSet,
+        NavigableMap<KeyValue, KeyValue> snapshot) throws IOException {
       List<IteratorWrapper> inputs = new ArrayList<>();
       if (kvSet != null && kvSet.size() > 0) {
-        inputs.add(new IteratorWrapper(kvSet.iterator()));
+        inputs.add(new IteratorWrapper(kvSet.values().iterator()));
       }
       if (snapshot != null && snapshot.size() > 0) {
-        inputs.add(new IteratorWrapper(snapshot.iterator()));
+        inputs.add(new IteratorWrapper(snapshot.values().iterator()));
       }
       it = new MultiIter(inputs.toArray(new IteratorWrapper[0]));
     }

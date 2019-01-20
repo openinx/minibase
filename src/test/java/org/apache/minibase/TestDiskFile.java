@@ -68,7 +68,7 @@ public class TestDiskFile {
     String dbFile = "testDiskFileWriter.db";
     try {
       try (DiskFileWriter diskWriter = new DiskFileWriter(dbFile)) {
-        for (int i = 0; i < 1000000; i++) {
+        for (int i = 0; i < 1000; i++) {
           diskWriter.append(KeyValue.create(generateRandomBytes(), generateRandomBytes()));
         }
         diskWriter.appendIndex();
@@ -89,7 +89,7 @@ public class TestDiskFile {
   @Test
   public void testDiskFileIO() throws IOException {
     String dbFile = "testDiskFileIO.db";
-    int rowsCount = 1000000;
+    int rowsCount = 1000;
 
     try {
       DiskFileWriter diskWriter = new DiskFileWriter(dbFile);

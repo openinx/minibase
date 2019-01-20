@@ -67,7 +67,7 @@ public class KeyValue implements Comparable<KeyValue> {
     return this.compareTo(that) == 0;
   }
 
-  public int size() {
+  public int getSerializeSize() {
     return KEY_LEN + VAL_LEN + key.length + value.length;
   }
 

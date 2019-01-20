@@ -85,7 +85,7 @@ public class DiskFile implements Closeable {
     public void append(KeyValue lastKV, long offset, long size, byte[] bloomFilter) {
       BlockMeta meta = new BlockMeta(lastKV.getKey(), offset, size, bloomFilter);
       blockMetas.add(meta);
-      totalBytes += meta.size();
+      totalBytes += meta.getSerializeSize();
     }
 
     public byte[] serialize() throws IOException {
@@ -128,7 +128,7 @@ public class DiskFile implements Closeable {
       byte[] buf = kv.toBytes();
       crc32.update(buf, 0, buf.length);
 
-      totalSize += kv.size();
+      totalSize += kv.getSerializeSize();
       keyValueCount += 1;
     }
 
@@ -141,7 +141,7 @@ public class DiskFile implements Closeable {
     }
 
     public int getChecksum() {
-      return (int) (crc32.getValue() & 0xFFFFFFFF);
+      return (int) crc32.getValue();
     }
 
     public KeyValue getLastKV() {
@@ -160,7 +160,7 @@ public class DiskFile implements Closeable {
       byte[] buffer = new byte[size()];
       int pos = 0;
 
-      // Append kv size.
+      // Append kv getSerializeSize.
       byte[] kvSize = Bytes.toBytes(kvBuf.size());
       System.arraycopy(kvSize, 0, buffer, pos, kvSize.length);
       pos += kvSize.length;
@@ -195,7 +195,7 @@ public class DiskFile implements Closeable {
       List<KeyValue> kvBuf = new ArrayList<KeyValue>();
       Checksum crc32 = new CRC32();
 
-      // Parse kv size
+      // Parse kv getSerializeSize
       int kvSize = Bytes.toInt(Bytes.slice(buffer, offset + pos, BlockWriter.KV_SIZE_LEN));
       pos += BlockWriter.KV_SIZE_LEN;
 
@@ -203,8 +203,8 @@ public class DiskFile implements Closeable {
       for (int i = 0; i < kvSize; i++) {
         KeyValue kv = KeyValue.parseFrom(buffer, offset + pos);
         kvBuf.add(kv);
-        crc32.update(buffer, offset + pos, kv.size());
-        pos += kv.size();
+        crc32.update(buffer, offset + pos, kv.getSerializeSize());
+        pos += kv.getSerializeSize();
       }
 
       // Parse checksum
@@ -212,7 +212,7 @@ public class DiskFile implements Closeable {
       pos += BlockWriter.CHECKSUM_LEN;
       assert checksum == (int) (crc32.getValue() & 0xFFFFFFFF);
 
-      assert pos == size : "pos: " + pos + ", size: " + size;
+      assert pos == size : "pos: " + pos + ", getSerializeSize: " + size;
 
       return new BlockReader(kvBuf);
     }
@@ -264,10 +264,10 @@ public class DiskFile implements Closeable {
     public void append(KeyValue kv) throws IOException {
       if (kv == null) return;
 
-      assert kv.size() + BlockWriter.KV_SIZE_LEN + BlockWriter.CHECKSUM_LEN < BLOCK_SIZE_UP_LIMIT;
+      assert kv.getSerializeSize() + BlockWriter.KV_SIZE_LEN + BlockWriter.CHECKSUM_LEN < BLOCK_SIZE_UP_LIMIT;
 
       if ((currentWriter.getKeyValueCount() > 0)
-          && (kv.size() + currentWriter.size() >= BLOCK_SIZE_UP_LIMIT)) {
+          && (kv.getSerializeSize() + currentWriter.size() >= BLOCK_SIZE_UP_LIMIT)) {
         switchNextBlockWriter();
       }
 
@@ -365,11 +365,11 @@ public class DiskFile implements Closeable {
 
     do {
       BlockMeta meta = BlockMeta.parseFrom(buffer, offset);
-      offset += meta.size();
+      offset += meta.getSerializeSize();
       blockMetaSet.add(meta);
     } while (offset < buffer.length);
 
-    assert blockMetaSet.size() == this.blockCount : "blockMetaSet.size:" + blockMetaSet.size()
+    assert blockMetaSet.size() == this.blockCount : "blockMetaSet.getSerializeSize:" + blockMetaSet.size()
         + ", blockCount: " + blockCount;
   }
 

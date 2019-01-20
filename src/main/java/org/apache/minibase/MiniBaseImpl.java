@@ -1,7 +1,6 @@
 package org.apache.minibase;
 
 import org.apache.minibase.DiskStore.DefaultCompactor;
-import org.apache.minibase.DiskStore.DefaultFlusher;
 import org.apache.minibase.DiskStore.MultiIter;
 
 import java.io.IOException;
@@ -10,47 +9,36 @@ import java.util.List;
 
 public class MiniBaseImpl implements MiniBase {
 
-  private static final String DEFAULT_DATA_DIR = "MiniBase";
-
-  private String dataDir = DEFAULT_DATA_DIR;
-  private long maxMemStoreSize = 256 * 1024 * 1024L;
-
-  private int MAX_DISK_FILES = 10;
-  private int maxDiskFiles = MAX_DISK_FILES;
-
   private MemStore memStore;
   private DiskStore diskStore;
   private Compactor compactor;
 
-  public MiniBaseImpl setDataDir(String datDir) {
-    this.dataDir = datDir;
-    return this;
-  }
-
-  public MiniBaseImpl setMaxMemStoreSize(long maxMemStoreSize) {
-    this.maxMemStoreSize = maxMemStoreSize;
-    return this;
-  }
-
-  public MiniBaseImpl setMaxDiskFiles(int maxDiskFiles) {
-    this.maxDiskFiles = maxDiskFiles;
-    return this;
-  }
+  private Config conf;
 
   public MiniBase open() throws IOException {
-    diskStore = new DiskStore(this.dataDir, maxDiskFiles);
+    assert conf != null;
+    // initialize the disk store.
+    diskStore = new DiskStore(conf.getDataDir(), conf.getMaxDiskFiles());
     diskStore.open();
 
-    memStore = new MemStore(maxMemStoreSize, new DefaultFlusher(diskStore));
-    memStore.start();
+    // initialize the memstore.
+    memStore = new MemStore();
 
     compactor = new DefaultCompactor(diskStore);
     compactor.start();
     return this;
   }
+  
+  private MiniBaseImpl(Config conf) {
+    this.conf = conf;
+  }
+  
+  public static MiniBaseImpl create(Config conf) {
+    return new MiniBaseImpl(conf);
+  }
 
   public static MiniBaseImpl create() {
-    return new MiniBaseImpl();
+    return create(Config.getDefault());
   }
 
   @Override
@@ -85,7 +73,6 @@ public class MiniBaseImpl implements MiniBase {
 
   @Override
   public void close() throws IOException {
-    memStore.flush();
     memStore.close();
     diskStore.close();
     compactor.interrupt();

@@ -179,7 +179,7 @@ public class TestMultiIter {
   public void testDiskFileMergeSort() throws IOException {
     testDiskFileMergeSort(new String[] { "a.db", "b.db" }, "c.db", 10);
     testDiskFileMergeSort(new String[] { "a.db" }, "b.db", 1);
-    testDiskFileMergeSort(new String[] { "a.db", "b.db", "c.db" }, "d.db", 10000000);
+    testDiskFileMergeSort(new String[] { "a.db", "b.db", "c.db" }, "d.db", 1000);
     testDiskFileMergeSort(new String[] { "a.db", "b.db", "c.db" }, "d.db", 100);
   }
 }

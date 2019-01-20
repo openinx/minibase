@@ -17,7 +17,7 @@ public interface MiniBase extends Closeable {
   Iter<KeyValue> scan() throws IOException;
 
   interface Flusher {
-    public void flush(Set<KeyValue> kvSet) throws IOException;
+    void flush(Set<KeyValue> kvSet) throws IOException;
   }
 
   abstract class Compactor extends Thread {
@@ -28,5 +28,12 @@ public interface MiniBase extends Closeable {
     boolean hasNext() throws IOException;
 
     KeyValue next() throws IOException;
+
+    /**
+     * Seek to the largest key value which is less than or equal to the target key value.
+     * @param kv target key value to seek
+     * @throws IOException error to throw if fail to read file or memstore.
+     */
+    //void seekTo(KeyValue kv) throws IOException;
   }
 }
