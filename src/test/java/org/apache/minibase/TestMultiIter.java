@@ -24,7 +24,7 @@ public class TestMultiIter {
       kvs = new KeyValue[array.length];
       for (int i = 0; i < array.length; i++) {
         String s = String.format("%05d", array[i]);
-        kvs[i] = new KeyValue(Bytes.toBytes(s), Bytes.toBytes(s));
+        kvs[i] = KeyValue.createPut(Bytes.toBytes(s), Bytes.toBytes(s), 1L);
       }
       cur = 0;
     }
@@ -78,16 +78,16 @@ public class TestMultiIter {
 
   @Test
   public void testMergeSort3() throws IOException {
-    int[] a = new int[] {};
-    int[] b = new int[] { 1 };
+    int[] a = new int[]{};
+    int[] b = new int[]{1};
     MockIter iter1 = new MockIter(a);
     MockIter iter2 = new MockIter(b);
-    Iter<KeyValue>[] iters = new Iter[] { iter1, iter2 };
+    Iter<KeyValue>[] iters = new Iter[]{iter1, iter2};
     MultiIter multiIter = new MultiIter(iters);
 
     Assert.assertTrue(multiIter.hasNext());
     Assert.assertEquals(multiIter.next(),
-      KeyValue.create(Bytes.toBytes("00001"), Bytes.toBytes("00001")));
+            KeyValue.createPut(Bytes.toBytes("00001"), Bytes.toBytes("00001"), 1L));
     Assert.assertFalse(multiIter.hasNext());
   }
 
@@ -105,7 +105,7 @@ public class TestMultiIter {
     int count = 0;
     while (multiIter.hasNext()) {
       Assert.assertEquals(multiIter.next(),
-        KeyValue.create(Bytes.toBytes("00001"), Bytes.toBytes("00001")));
+              KeyValue.createPut(Bytes.toBytes("00001"), Bytes.toBytes("00001"), 1L));
       count++;
     }
     Assert.assertEquals(count, 4);
@@ -123,7 +123,7 @@ public class TestMultiIter {
       }
       for (int i = 0; i < rowCount; i++) {
         int k = i % inputs.length;
-        writers[k].append(KeyValue.create(Bytes.toBytes(i), Bytes.toBytes(i)));
+        writers[k].append(KeyValue.createPut(Bytes.toBytes(i), Bytes.toBytes(i), 1L));
       }
       for (int i = 0; i < inputs.length; i++) {
         writers[i].appendIndex();
@@ -157,7 +157,7 @@ public class TestMultiIter {
       int count = 0;
       while (resultIter.hasNext()) {
         Assert.assertEquals(resultIter.next(),
-          KeyValue.create(Bytes.toBytes(count), Bytes.toBytes(count)));
+                KeyValue.createPut(Bytes.toBytes(count), Bytes.toBytes(count), 1L));
         count++;
       }
       Assert.assertEquals(count, rowCount);

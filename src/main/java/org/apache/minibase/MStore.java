@@ -9,13 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
-public class MiniBaseImpl implements MiniBase {
+public class MStore implements MiniBase {
 
   private ExecutorService pool;
   private MemStore memStore;
   private DiskStore diskStore;
   private Compactor compactor;
+  private AtomicLong sequenceId;
 
   private Config conf;
 
@@ -28,6 +30,8 @@ public class MiniBaseImpl implements MiniBase {
     // initialize the disk store.
     this.diskStore = new DiskStore(conf.getDataDir(), conf.getMaxDiskFiles());
     this.diskStore.open();
+    // TODO initialize the max sequence id here.
+    this.sequenceId = new AtomicLong(0);
 
     // initialize the memstore.
     this.memStore = new MemStore(conf, new DefaultFlusher(diskStore), pool);
@@ -37,21 +41,21 @@ public class MiniBaseImpl implements MiniBase {
     return this;
   }
 
-  private MiniBaseImpl(Config conf) {
+  private MStore(Config conf) {
     this.conf = conf;
   }
 
-  public static MiniBaseImpl create(Config conf) {
-    return new MiniBaseImpl(conf);
+  public static MStore create(Config conf) {
+    return new MStore(conf);
   }
 
-  public static MiniBaseImpl create() {
+  public static MStore create() {
     return create(Config.getDefault());
   }
 
   @Override
   public void put(byte[] key, byte[] value) throws IOException {
-    this.memStore.add(KeyValue.create(key, value));
+    this.memStore.add(KeyValue.createPut(key, value, sequenceId.incrementAndGet()));
   }
 
   @Override
@@ -62,19 +66,13 @@ public class MiniBaseImpl implements MiniBase {
 
   @Override
   public void delete(byte[] key) throws IOException {
-    // TODO
+    this.memStore.add(KeyValue.createDelete(key, sequenceId.incrementAndGet()));
   }
 
   @Override
   public Iter<KeyValue> scan(byte[] start, byte[] stop) throws IOException {
-    // TODO
-    return null;
-  }
-
-  @Override
-  public Iter<KeyValue> scan() throws IOException {
     List<Iter<KeyValue>> iterList = new ArrayList<>();
-    iterList.add(memStore.iterator());
+    iterList.add(memStore.createIterator());
     iterList.add(diskStore.createIterator());
     return new MultiIter(iterList);
   }

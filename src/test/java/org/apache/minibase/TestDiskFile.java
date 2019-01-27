@@ -19,10 +19,12 @@ public class TestDiskFile {
   @Test
   public void testBlockEncoding() throws IOException {
     BlockWriter bw = new BlockWriter();
+    byte[] lastBytes = null;
     for (int i = 0; i < 100; i++) {
-      bw.append(new KeyValue(Bytes.toBytes(i), Bytes.toBytes(i)));
+      lastBytes = Bytes.toBytes(i);
+      bw.append(KeyValue.createPut(lastBytes, lastBytes, 1L));
     }
-    Assert.assertEquals(bw.getLastKV(), new KeyValue(Bytes.toBytes(99), Bytes.toBytes(99)));
+    Assert.assertEquals(bw.getLastKV(), KeyValue.createPut(lastBytes, lastBytes, 1L));
 
     byte[] buffer = bw.serialize();
     BlockReader br = BlockReader.parseFrom(bw.serialize(), 0, buffer.length);
@@ -33,24 +35,24 @@ public class TestDiskFile {
       bytes[i] = br.getKeyValues().get(i).getKey();
     }
     BloomFilter bloom =
-        new BloomFilter(DiskFile.BLOOM_FILTER_HASH_COUNT, DiskFile.BLOOM_FILTER_BITS_PER_KEY);
+            new BloomFilter(DiskFile.BLOOM_FILTER_HASH_COUNT, DiskFile.BLOOM_FILTER_BITS_PER_KEY);
     Assert.assertArrayEquals(bloom.generate(bytes), bw.getBloomFilter());
   }
 
   @Test
   public void testBlockMeta() throws IOException {
-    byte[] lastKey = Bytes.toBytes("abc");
+    KeyValue lastKV = KeyValue.createPut(Bytes.toBytes("abc"), Bytes.toBytes("abc"), 1L);
     long offset = 1024, size = 1024;
     byte[] bloomFilter = Bytes.toBytes("bloomFilter");
 
-    BlockMeta meta = new BlockMeta(lastKey, offset, size, bloomFilter);
+    BlockMeta meta = new BlockMeta(lastKV, offset, size, bloomFilter);
     byte[] buffer = meta.toBytes();
 
     BlockMeta meta2 = BlockMeta.parseFrom(buffer, 0);
 
-    Assert.assertArrayEquals(lastKey, meta2.getKey());
-    Assert.assertEquals(offset, meta2.getOffset());
-    Assert.assertEquals(size, meta2.getSize());
+    Assert.assertEquals(lastKV, meta2.getLastKV());
+    Assert.assertEquals(offset, meta2.getBlockOffset());
+    Assert.assertEquals(size, meta2.getBlockSize());
     Assert.assertArrayEquals(bloomFilter, meta2.getBloomFilter());
   }
 
@@ -69,7 +71,7 @@ public class TestDiskFile {
     try {
       try (DiskFileWriter diskWriter = new DiskFileWriter(dbFile)) {
         for (int i = 0; i < 1000; i++) {
-          diskWriter.append(KeyValue.create(generateRandomBytes(), generateRandomBytes()));
+          diskWriter.append(KeyValue.createPut(generateRandomBytes(), generateRandomBytes(), 1L));
         }
         diskWriter.appendIndex();
         diskWriter.appendTrailer();
@@ -95,7 +97,7 @@ public class TestDiskFile {
       DiskFileWriter diskWriter = new DiskFileWriter(dbFile);
 
       for (int i = 0; i < rowsCount; i++) {
-        diskWriter.append(KeyValue.create(Bytes.toBytes(i), Bytes.toBytes(i)));
+        diskWriter.append(KeyValue.createPut(Bytes.toBytes(i), Bytes.toBytes(i), 1L));
       }
 
       diskWriter.appendIndex();
@@ -108,7 +110,8 @@ public class TestDiskFile {
         int index = 0;
         while (it.hasNext()) {
           KeyValue kv = it.next();
-          Assert.assertEquals(KeyValue.create(Bytes.toBytes(index), Bytes.toBytes(index)), kv);
+          Assert.assertEquals(KeyValue.createPut(Bytes.toBytes(index), Bytes.toBytes(index), 1L),
+                  kv);
           index++;
         }
         Assert.assertEquals(index, rowsCount);

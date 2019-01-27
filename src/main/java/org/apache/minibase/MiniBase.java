@@ -22,6 +22,16 @@ public interface MiniBase extends Closeable {
    */
   Iter<KeyValue> scan(byte[] startKey, byte[] stopKey) throws IOException;
 
+  /**
+   * Full scan the Key Value store.
+   *
+   * @return Iterator to fetch the key value one by one.
+   * @throws IOException
+   */
+  default Iter<KeyValue> scan() throws IOException {
+    return scan(Bytes.EMPTY_BYTES, Bytes.EMPTY_BYTES);
+  }
+
   interface Iter<KeyValue> {
     boolean hasNext() throws IOException;
 

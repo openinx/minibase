@@ -3,6 +3,9 @@ package org.apache.minibase;
 import java.io.IOException;
 
 public class Bytes {
+
+  public final static byte[] EMPTY_BYTES = new byte[0];
+
   public static byte[] toBytes(byte b) {
     return new byte[] { b };
   }
@@ -91,5 +94,4 @@ public class Bytes {
     }
     return a.length - b.length;
   }
-
 }

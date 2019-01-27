@@ -122,7 +122,7 @@ public class MemStore implements Closeable {
     }
   }
 
-  public Iter<KeyValue> iterator() throws IOException {
+  public Iter<KeyValue> createIterator() throws IOException {
     return new MemStoreIter(kvMap, snapshot);
   }
 

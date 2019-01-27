@@ -1,5 +1,6 @@
 package org.apache.minibase;
 
+import org.apache.minibase.KeyValue.Op;
 import org.apache.minibase.MiniBase.Iter;
 import org.junit.After;
 import org.junit.Assert;
@@ -59,8 +60,8 @@ public class TestMiniBase {
   public void testPut() throws IOException, InterruptedException {
     // Set maxMemstoreSize to 64B, which make the memstore flush frequently.
     Config conf = new Config().setDataDir(dataDir).setMaxMemstoreSize(1).setFlushMaxRetries(1)
-        .setMaxDiskFiles(10);
-    final MiniBase db = MiniBaseImpl.create(conf).open();
+            .setMaxDiskFiles(10);
+    final MiniBase db = MStore.create(conf).open();
 
     final long totalKVSize = 100L;
     final int threadSize = 5;
@@ -80,8 +81,13 @@ public class TestMiniBase {
     long current = 0;
     while (kv.hasNext()) {
       KeyValue expected = kv.next();
-      KeyValue currentKV = KeyValue.create(Bytes.toBytes(current), Bytes.toBytes(current));
-      Assert.assertEquals(expected, currentKV);
+      KeyValue currentKV = KeyValue.createPut(Bytes.toBytes(current), Bytes.toBytes(current), 0L);
+      Assert.assertArrayEquals(expected.getKey(), currentKV.getKey());
+      Assert.assertArrayEquals(expected.getValue(), currentKV.getValue());
+      Assert.assertEquals(expected.getOp(), Op.Put);
+
+      long sequenceId = expected.getSequenceId();
+      Assert.assertTrue("SequenceId: " + sequenceId, sequenceId > 0);
       current++;
     }
     Assert.assertEquals(current, totalKVSize);

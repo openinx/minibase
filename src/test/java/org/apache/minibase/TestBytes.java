@@ -7,7 +7,7 @@ public class TestBytes {
 
   @Test
   public void testByte() {
-    Assert.assertArrayEquals(new byte[] { 'a' }, Bytes.toBytes((byte) 'a'));
+    Assert.assertArrayEquals(new byte[]{'a'}, Bytes.toBytes((byte) 'a'));
   }
 
   @Test
@@ -31,9 +31,9 @@ public class TestBytes {
   @Test
   public void testCompare() {
     Assert.assertEquals(Bytes.compare(null, null), 0);
-    Assert.assertEquals(Bytes.compare(new byte[] { 0x00 }, new byte[0]), 1);
-    Assert.assertEquals(Bytes.compare(new byte[] { 0x00 }, new byte[] { 0x00 }), 0);
-    Assert.assertEquals(Bytes.compare(new byte[] { 0x00 }, null), 1);
-    Assert.assertEquals(Bytes.compare(new byte[] { 0x00 }, new byte[] { 0x01 }), -1);
+    Assert.assertEquals(Bytes.compare(new byte[]{0x00}, new byte[0]), 1);
+    Assert.assertEquals(Bytes.compare(new byte[]{0x00}, new byte[]{0x00}), 0);
+    Assert.assertEquals(Bytes.compare(new byte[]{0x00}, null), 1);
+    Assert.assertEquals(Bytes.compare(new byte[]{0x00}, new byte[]{0x01}), -1);
   }
 }

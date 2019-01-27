@@ -36,44 +36,110 @@ public class DiskFile implements Closeable {
   private long blockIndexOffset;
   private long blockIndexSize;
 
-  public static class BlockMeta extends KeyValue {
+  public static class BlockMeta implements Comparable<BlockMeta> {
 
-    public static byte[] encodeValue(long offset, long size, byte[] bloomFilter) {
-      byte[] result = Bytes.toBytes(Bytes.toBytes(offset), Bytes.toBytes(size));
-      byte[] bloomFilterWithSize = Bytes.toBytes(Bytes.toBytes(bloomFilter.length), bloomFilter);
-      return Bytes.toBytes(result, bloomFilterWithSize);
-    }
+    private static final int OFFSET_SIZE = 8;
+    private static final int SIZE_SIZE = 8;
+    private static final int BF_LEN_SIZE = 4;
 
-    public static BlockMeta parseFrom(byte[] buffer, int bufferOffset) throws IOException {
-      KeyValue kv = KeyValue.parseFrom(buffer, bufferOffset);
-      long offset = Bytes.toLong(Bytes.slice(kv.getValue(), 0, 8));
-      long size = Bytes.toLong(Bytes.slice(kv.getValue(), 0 + 8, 8));
-      int bloomFilterSize = Bytes.toInt(Bytes.slice(kv.getValue(), 0 + 8 + 8, 4));
-      byte[] bloomFilter = Bytes.slice(kv.getValue(), 0 + 8 + 8 + 4, bloomFilterSize);
-      return new BlockMeta(kv.getKey(), offset, size, bloomFilter);
-    }
-
-    private long offset;
-    private long size;
+    private KeyValue lastKV;
+    private long blockOffset;
+    private long blockSize;
     private byte[] bloomFilter;
 
-    public BlockMeta(byte[] lastKey, long offset, long size, byte[] bloomFilter) {
-      super(lastKey, encodeValue(offset, size, bloomFilter));
-      this.offset = offset;
-      this.size = size;
+    public BlockMeta(KeyValue lastKV, long offset, long size, byte[] bloomFilter) {
+      this.lastKV = lastKV;
+      this.blockOffset = offset;
+      this.blockSize = size;
       this.bloomFilter = bloomFilter;
     }
 
-    public long getOffset() {
-      return this.offset;
+    public KeyValue getLastKV() {
+      return this.lastKV;
     }
 
-    public long getSize() {
-      return this.size;
+    public long getBlockOffset() {
+      return this.blockOffset;
+    }
+
+    public long getBlockSize() {
+      return this.blockSize;
     }
 
     public byte[] getBloomFilter() {
       return this.bloomFilter;
+    }
+
+    public int getSerializeSize() {
+      // TODO the meta no need the value of last kv, will save much bytes.
+      return lastKV.getSerializeSize() + OFFSET_SIZE + SIZE_SIZE + BF_LEN_SIZE + bloomFilter.length;
+    }
+
+    public byte[] toBytes() throws IOException {
+      byte[] bytes = new byte[getSerializeSize()];
+      int pos = 0;
+
+      // Encode last kv
+      byte[] kvBytes = lastKV.toBytes();
+      System.arraycopy(kvBytes, 0, bytes, pos, kvBytes.length);
+      pos += kvBytes.length;
+
+      // Encode blockOffset
+      byte[] offsetBytes = Bytes.toBytes(blockOffset);
+      System.arraycopy(offsetBytes, 0, bytes, pos, offsetBytes.length);
+      pos += offsetBytes.length;
+
+      // Encode blockSize
+      byte[] sizeBytes = Bytes.toBytes(blockSize);
+      System.arraycopy(sizeBytes, 0, bytes, pos, sizeBytes.length);
+      pos += sizeBytes.length;
+
+      // Encode length of bloom filter
+      byte[] bfLenBytes = Bytes.toBytes(bloomFilter.length);
+      System.arraycopy(bfLenBytes, 0, bytes, pos, bfLenBytes.length);
+      pos += bfLenBytes.length;
+
+      // Encode bytes of bloom filter.
+      System.arraycopy(bloomFilter, 0, bytes, pos, bloomFilter.length);
+      pos += bloomFilter.length;
+
+      if (pos != bytes.length) {
+        throw new IOException(
+                "pos(" + pos + ") should be equal to length of bytes (" + bytes.length + ")");
+      }
+      return bytes;
+    }
+
+    public static BlockMeta parseFrom(byte[] buf, int offset) throws IOException {
+      int pos = offset;
+
+      // Decode last key value.
+      KeyValue lastKV = KeyValue.parseFrom(buf, offset);
+      pos += lastKV.getSerializeSize();
+
+      // Decode block blockOffset
+      long blockOffset = Bytes.toLong(Bytes.slice(buf, pos, OFFSET_SIZE));
+      pos += OFFSET_SIZE;
+
+      // Decode block blockSize
+      long blockSize = Bytes.toLong(Bytes.slice(buf, pos, SIZE_SIZE));
+      pos += SIZE_SIZE;
+
+      // Decode blockSize of block bloom filter
+      int bloomFilterSize = Bytes.toInt(Bytes.slice(buf, pos, BF_LEN_SIZE));
+      pos += BF_LEN_SIZE;
+
+      // Decode bytes of block bloom filter
+      byte[] bloomFilter = Bytes.slice(buf, pos, bloomFilterSize);
+      pos += bloomFilterSize;
+
+      assert pos <= buf.length;
+      return new BlockMeta(lastKV, blockOffset, blockSize, bloomFilter);
+    }
+
+    @Override
+    public int compareTo(BlockMeta o) {
+      return this.lastKV.compareTo(o.lastKV);
     }
   }
 
@@ -83,7 +149,7 @@ public class DiskFile implements Closeable {
     private int totalBytes = 0;
 
     public void append(KeyValue lastKV, long offset, long size, byte[] bloomFilter) {
-      BlockMeta meta = new BlockMeta(lastKV.getKey(), offset, size, bloomFilter);
+      BlockMeta meta = new BlockMeta(lastKV, offset, size, bloomFilter);
       blockMetas.add(meta);
       totalBytes += meta.getSerializeSize();
     }
@@ -360,7 +426,7 @@ public class DiskFile implements Closeable {
     in.seek(blockIndexOffset);
     assert in.read(buffer) == blockIndexSize;
 
-    // TODO offset may overflow.
+    // TODO blockOffset may overflow.
     int offset = 0;
 
     do {
@@ -378,10 +444,10 @@ public class DiskFile implements Closeable {
   }
 
   private BlockReader load(BlockMeta meta) throws IOException {
-    in.seek(meta.getOffset());
+    in.seek(meta.getBlockOffset());
 
     // TODO Maybe overflow.
-    byte[] buffer = new byte[(int) meta.getSize()];
+    byte[] buffer = new byte[(int) meta.getBlockSize()];
 
     assert in.read(buffer) == buffer.length;
     return BlockReader.parseFrom(buffer, 0, buffer.length);
