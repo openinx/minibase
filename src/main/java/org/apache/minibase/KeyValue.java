@@ -148,6 +148,15 @@ public class KeyValue implements Comparable<KeyValue> {
     return RAW_KEY_LEN_SIZE + VAL_LEN_SIZE + getRawKeyLen() + value.length;
   }
 
+  @Override
+  public String toString() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("key=").append(Bytes.toHex(this.key)).append("/op=").append(op).append
+            ("/sequenceId=").append(this.sequenceId).append("/value=").append(Bytes.toHex(this
+            .value));
+    return sb.toString();
+  }
+
   public static KeyValue parseFrom(byte[] bytes, int offset) throws IOException {
     if (bytes == null) {
       throw new IOException("buffer is null");

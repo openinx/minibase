@@ -2,6 +2,7 @@ package org.apache.minibase;
 
 import org.apache.log4j.Logger;
 import org.apache.minibase.DiskFile.DiskFileWriter;
+import org.apache.minibase.MStore.SeekIter;
 import org.apache.minibase.MiniBase.Compactor;
 import org.apache.minibase.MiniBase.Flusher;
 import org.apache.minibase.MiniBase.Iter;
@@ -115,13 +116,13 @@ public class DiskStore implements Closeable {
     }
   }
 
-  public Iter<KeyValue> createIterator(List<DiskFile> diskFiles) throws IOException {
-    List<Iter<KeyValue>> iters = new ArrayList<>();
+  public SeekIter<KeyValue> createIterator(List<DiskFile> diskFiles) throws IOException {
+    List<SeekIter<KeyValue>> iters = new ArrayList<>();
     diskFiles.forEach(df -> iters.add(df.iterator()));
     return new MultiIter(iters);
   }
 
-  public Iter<KeyValue> createIterator() throws IOException {
+  public SeekIter<KeyValue> createIterator() throws IOException {
     return createIterator(getDiskFiles());
   }
 
@@ -240,23 +241,25 @@ public class DiskStore implements Closeable {
     }
   }
 
-  public static class MultiIter implements Iter<KeyValue> {
+  public static class MultiIter implements SeekIter<KeyValue> {
 
     private class IterNode {
       KeyValue kv;
-      Iter<KeyValue> iter;
+      SeekIter<KeyValue> iter;
 
-      public IterNode(KeyValue kv, Iter<KeyValue> it) {
+      public IterNode(KeyValue kv, SeekIter<KeyValue> it) {
         this.kv = kv;
         this.iter = it;
       }
     }
 
+    private SeekIter<KeyValue> iters[];
     private PriorityQueue<IterNode> queue;
 
-    public MultiIter(Iter<KeyValue> iters[]) throws IOException {
+    public MultiIter(SeekIter<KeyValue> iters[]) throws IOException {
       assert iters != null;
-      queue = new PriorityQueue<>(((o1, o2) -> o1.kv.compareTo(o2.kv)));
+      this.iters = iters; // Used for seekTo
+      this.queue = new PriorityQueue<>(((o1, o2) -> o1.kv.compareTo(o2.kv)));
       for (int i = 0; i < iters.length; i++) {
         if (iters[i] != null && iters[i].hasNext()) {
           queue.add(new IterNode(iters[i].next(), iters[i]));
@@ -264,14 +267,9 @@ public class DiskStore implements Closeable {
       }
     }
 
-    public MultiIter(List<Iter<KeyValue>> iters) throws IOException {
-      assert iters != null;
-      queue = new PriorityQueue<>(((o1, o2) -> o1.kv.compareTo(o2.kv)));
-      for (Iter<KeyValue> iter : iters) {
-        if (iter != null && iter.hasNext()) {
-          queue.add(new IterNode(iter.next(), iter));
-        }
-      }
+    @SuppressWarnings("unchecked")
+    public MultiIter(List<SeekIter<KeyValue>> iters) throws IOException {
+      this(iters.toArray(new SeekIter[0]));
     }
 
     @Override
@@ -291,6 +289,18 @@ public class DiskStore implements Closeable {
         }
       }
       return null;
+    }
+
+    @Override
+    public void seekTo(KeyValue kv) throws IOException {
+      queue.clear();
+      for (SeekIter<KeyValue> it : iters) {
+        it.seekTo(kv);
+        if (it.hasNext()) {
+          // Only the iterator which has some elements should be enqueued.
+          queue.add(new IterNode(it.next(), it));
+        }
+      }
     }
   }
 }

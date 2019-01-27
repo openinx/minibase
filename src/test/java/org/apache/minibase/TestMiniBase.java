@@ -1,6 +1,8 @@
 package org.apache.minibase;
 
 import org.apache.minibase.KeyValue.Op;
+import org.apache.minibase.MStore.ScanIter;
+import org.apache.minibase.MStore.SeekIter;
 import org.apache.minibase.MiniBase.Iter;
 import org.junit.After;
 import org.junit.Assert;
@@ -9,6 +11,8 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class TestMiniBase {
 
@@ -92,5 +96,99 @@ public class TestMiniBase {
     }
     Assert.assertEquals(current, totalKVSize);
     db.close();
+  }
+
+  @Test
+  public void testMixedOp() throws Exception {
+    Config conf = new Config().setDataDir(dataDir).setMaxMemstoreSize(2 * 1024 * 1024);
+    MiniBase db = MStore.create(conf).open();
+
+    byte[] A = Bytes.toBytes("A");
+    byte[] B = Bytes.toBytes("B");
+    byte[] C = Bytes.toBytes("C");
+
+    db.put(A, A);
+    Assert.assertArrayEquals(db.get(A).getValue(), A);
+
+    db.delete(A);
+    Assert.assertNull(db.get(A));
+
+    db.put(A, B);
+    Assert.assertArrayEquals(db.get(A).getValue(), B);
+
+    db.put(B, A);
+    Assert.assertArrayEquals(db.get(B).getValue(), A);
+
+    db.put(B, B);
+    Assert.assertArrayEquals(db.get(B).getValue(), B);
+
+    db.put(C, C);
+    Assert.assertArrayEquals(db.get(C).getValue(), C);
+
+    db.delete(B);
+    Assert.assertNull(db.get(B));
+  }
+
+  static class MockSeekIter implements SeekIter<KeyValue> {
+
+    private int curIdx = 0;
+    private List<KeyValue> list;
+
+    public MockSeekIter(List<KeyValue> list) {
+      this.list = list;
+    }
+
+    @Override
+    public void seekTo(KeyValue kv) throws IOException {
+      throw new IOException("Not implemented");
+    }
+
+    @Override
+    public boolean hasNext() throws IOException {
+      return curIdx < list.size();
+    }
+
+    @Override
+    public KeyValue next() throws IOException {
+      return list.get(curIdx++);
+    }
+  }
+
+
+  @Test
+  public void testScanIter() throws Exception {
+    List<KeyValue> list = new ArrayList<>();
+    byte[] A = Bytes.toBytes("A");
+    byte[] B = Bytes.toBytes("B");
+    byte[] C = Bytes.toBytes("C");
+    list.add(KeyValue.createDelete(A, 100));
+    list.add(KeyValue.createDelete(A, 100));
+    list.add(KeyValue.createPut(A, A, 100));
+    list.add(KeyValue.createDelete(A, 99));
+    list.add(KeyValue.createDelete(A, 99));
+    list.add(KeyValue.createPut(A, A, 99));
+    list.add(KeyValue.createPut(A, A, 99));
+
+    list.add(KeyValue.createPut(B, B, 100));
+    list.add(KeyValue.createPut(B, B, 99));
+    list.add(KeyValue.createPut(B, B, 99));
+
+    list.add(KeyValue.createPut(C, C, 80));
+    list.add(KeyValue.createDelete(C, 1));
+
+    ScanIter scan = new ScanIter(null, new MockSeekIter(list));
+    Assert.assertTrue(scan.hasNext());
+    Assert.assertEquals(scan.next(), KeyValue.createPut(B, B, 100));
+    Assert.assertTrue(scan.hasNext());
+    Assert.assertEquals(scan.next(), KeyValue.createPut(C, C, 80));
+    Assert.assertFalse(scan.hasNext());
+
+    scan = new ScanIter(KeyValue.createPut(B, B, 100), new MockSeekIter(list));
+    Assert.assertFalse(scan.hasNext());
+
+    scan = new ScanIter(KeyValue.createPut(C, C, 100), new MockSeekIter(list));
+    Assert.assertTrue(scan.hasNext());
+    Assert.assertEquals(scan.next(), KeyValue.createPut(B, B, 100));
+    Assert.assertFalse(scan.hasNext());
   }
 }

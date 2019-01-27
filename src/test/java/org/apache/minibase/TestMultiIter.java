@@ -2,6 +2,7 @@ package org.apache.minibase;
 
 import org.apache.minibase.DiskFile.DiskFileWriter;
 import org.apache.minibase.DiskStore.MultiIter;
+import org.apache.minibase.MStore.SeekIter;
 import org.apache.minibase.MiniBase.Iter;
 import org.junit.Assert;
 import org.junit.Test;
@@ -14,7 +15,7 @@ import java.util.List;
 
 public class TestMultiIter {
 
-  public static class MockIter implements Iter<KeyValue> {
+  public static class MockIter implements SeekIter<KeyValue> {
 
     private int cur;
     private KeyValue[] kvs;
@@ -38,6 +39,15 @@ public class TestMultiIter {
     public KeyValue next() throws IOException {
       return kvs[cur++];
     }
+
+    @Override
+    public void seekTo(KeyValue kv) throws IOException {
+      for (cur = 0; cur < kvs.length; cur++) {
+        if (kvs[cur].compareTo(kv) >= 0) {
+          break;
+        }
+      }
+    }
   }
 
   @Test
@@ -46,7 +56,7 @@ public class TestMultiIter {
     int[] b = new int[] { 11, 12, 12 };
     MockIter iter1 = new MockIter(a);
     MockIter iter2 = new MockIter(b);
-    Iter<KeyValue>[] iters = new Iter[] { iter1, iter2 };
+    SeekIter<KeyValue>[] iters = new SeekIter[] { iter1, iter2 };
     MultiIter multiIter = new MultiIter(iters);
 
     String[] results =
@@ -70,7 +80,7 @@ public class TestMultiIter {
     int[] b = new int[] {};
     MockIter iter1 = new MockIter(a);
     MockIter iter2 = new MockIter(b);
-    Iter<KeyValue>[] iters = new Iter[] { iter1, iter2 };
+    SeekIter<KeyValue>[] iters = new SeekIter[] { iter1, iter2 };
     MultiIter multiIter = new MultiIter(iters);
 
     Assert.assertFalse(multiIter.hasNext());
@@ -82,7 +92,7 @@ public class TestMultiIter {
     int[] b = new int[]{1};
     MockIter iter1 = new MockIter(a);
     MockIter iter2 = new MockIter(b);
-    Iter<KeyValue>[] iters = new Iter[]{iter1, iter2};
+    SeekIter<KeyValue>[] iters = new SeekIter[]{iter1, iter2};
     MultiIter multiIter = new MultiIter(iters);
 
     Assert.assertTrue(multiIter.hasNext());
@@ -99,7 +109,7 @@ public class TestMultiIter {
     MockIter iter1 = new MockIter(a);
     MockIter iter2 = new MockIter(b);
     MockIter iter3 = new MockIter(c);
-    Iter<KeyValue>[] iters = new Iter[] { iter1, iter2, iter3 };
+    SeekIter<KeyValue>[] iters = new SeekIter[] { iter1, iter2, iter3 };
     MultiIter multiIter = new MultiIter(iters);
 
     int count = 0;
@@ -116,7 +126,7 @@ public class TestMultiIter {
     try {
       DiskFileWriter[] writers = new DiskFileWriter[inputs.length];
       DiskFile[] readers = new DiskFile[inputs.length];
-      Iter<KeyValue> iterArray[] = new Iter[inputs.length];
+      SeekIter<KeyValue> iterArray[] = new SeekIter[inputs.length];
 
       for (int i = 0; i < inputs.length; i++) {
         writers[i] = new DiskFileWriter(inputs[i]);

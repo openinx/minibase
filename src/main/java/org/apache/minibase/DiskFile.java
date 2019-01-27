@@ -1,6 +1,6 @@
 package org.apache.minibase;
 
-import org.apache.minibase.MiniBase.Iter;
+import org.apache.minibase.MStore.SeekIter;
 
 import java.io.Closeable;
 import java.io.File;
@@ -46,6 +46,17 @@ public class DiskFile implements Closeable {
     private long blockOffset;
     private long blockSize;
     private byte[] bloomFilter;
+
+    /**
+     * Only used for {@link SeekIter} to seek a target block meta. we only care about the lastKV, so
+     * the other fields can be anything.
+     *
+     * @param lastKV the last key value to construct the dummy block meta.
+     * @return the dummy block meta.
+     */
+    private static BlockMeta createSeekDummy(KeyValue lastKV) {
+      return new BlockMeta(lastKV, 0L, 0L, Bytes.EMPTY_BYTES);
+    }
 
     public BlockMeta(KeyValue lastKV, long offset, long size, byte[] bloomFilter) {
       this.lastKV = lastKV;
@@ -453,7 +464,7 @@ public class DiskFile implements Closeable {
     return BlockReader.parseFrom(buffer, 0, buffer.length);
   }
 
-  private class InternalIterator implements Iter<KeyValue> {
+  private class InternalIterator implements SeekIter<KeyValue> {
 
     private int currentKVIndex = 0;
     private BlockReader currentReader;
@@ -491,9 +502,34 @@ public class DiskFile implements Closeable {
     public KeyValue next() throws IOException {
       return currentReader.getKeyValues().get(currentKVIndex++);
     }
+
+    @Override
+    public void seekTo(KeyValue target) throws IOException {
+      // Locate the smallest block meta which has the lastKV >= target.
+      blockMetaIter = blockMetaSet.tailSet(BlockMeta.createSeekDummy(target)).iterator();
+      currentReader = null;
+      if (blockMetaIter.hasNext()) {
+        currentReader = load(blockMetaIter.next());
+        currentKVIndex = 0;
+        // Locate the smallest KV which is greater than or equals to the given KV. We're sure that
+        // we can find the currentKVIndex, because lastKV of the block is greater than or equals
+        // to the target KV.
+        while (currentKVIndex < currentReader.getKeyValues().size()) {
+          KeyValue curKV = currentReader.getKeyValues().get(currentKVIndex);
+          if (curKV.compareTo(target) >= 0) {
+            break;
+          }
+          currentKVIndex++;
+        }
+        if (currentKVIndex >= currentReader.getKeyValues().size()) {
+          throw new IOException("Data block mis-encoded, lastKV of the currentReader >= kv, but " +
+                                "we found all kv < target");
+        }
+      }
+    }
   }
 
-  public Iter<KeyValue> iterator() {
+  public SeekIter<KeyValue> iterator() {
     return new InternalIterator();
   }
 

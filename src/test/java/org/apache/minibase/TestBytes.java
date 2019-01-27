@@ -11,6 +11,13 @@ public class TestBytes {
   }
 
   @Test
+  public void testToHex() {
+    byte[] bytes = Bytes.toBytes(567890);
+    String s = Bytes.toHex(bytes, 0, bytes.length);
+    Assert.assertEquals("\\x00\\x08\\xAAR", s);
+  }
+
+  @Test
   public void testInt() {
     Assert.assertEquals(Bytes.toInt(Bytes.toBytes(123455)), 123455);
     Assert.assertEquals(Bytes.toInt(Bytes.toBytes(-1)), -1);

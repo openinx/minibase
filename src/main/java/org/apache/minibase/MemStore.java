@@ -2,8 +2,8 @@ package org.apache.minibase;
 
 import org.apache.log4j.Logger;
 import org.apache.minibase.DiskStore.MultiIter;
+import org.apache.minibase.MStore.SeekIter;
 import org.apache.minibase.MiniBase.Flusher;
-import org.apache.minibase.MiniBase.Iter;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableMap;
+import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -63,7 +64,7 @@ public class MemStore implements Closeable {
     if (getDataSize() > conf.getMaxMemstoreSize()) {
       if (isSnapshotFlushing.get() && shouldBlocking) {
         throw new IOException(
-            "Memstore is full, currentDataSize=" + dataSize.get() + "B, maxMemstoreSize="
+                "Memstore is full, currentDataSize=" + dataSize.get() + "B, maxMemstoreSize="
                 + conf.getMaxMemstoreSize() + "B, please wait until the flushing is finished.");
       } else if (isSnapshotFlushing.compareAndSet(false, true)) {
         pool.submit(new FlusherTask());
@@ -101,12 +102,12 @@ public class MemStore implements Closeable {
       boolean success = false;
       for (int i = 0; i < conf.getFlushMaxRetries(); i++) {
         try {
-          flusher.flush(new IteratorWrapper(snapshot.values().iterator()));
+          flusher.flush(new IteratorWrapper(snapshot));
           success = true;
         } catch (IOException e) {
           LOG.error("Failed to flush memstore, retries=" + i + ", maxFlushRetries="
-              + conf.getFlushMaxRetries(),
-            e);
+                    + conf.getFlushMaxRetries(),
+                  e);
           if (i >= conf.getFlushMaxRetries()) {
             break;
           }
@@ -122,16 +123,18 @@ public class MemStore implements Closeable {
     }
   }
 
-  public Iter<KeyValue> createIterator() throws IOException {
+  public SeekIter<KeyValue> createIterator() throws IOException {
     return new MemStoreIter(kvMap, snapshot);
   }
 
-  public static class IteratorWrapper implements Iter<KeyValue> {
+  public static class IteratorWrapper implements SeekIter<KeyValue> {
 
+    private SortedMap<KeyValue, KeyValue> sortedMap;
     private Iterator<KeyValue> it;
 
-    public IteratorWrapper(Iterator<KeyValue> it) {
-      this.it = it;
+    public IteratorWrapper(SortedMap<KeyValue, KeyValue> sortedMap) {
+      this.sortedMap = sortedMap;
+      this.it = sortedMap.values().iterator();
     }
 
     @Override
@@ -143,20 +146,25 @@ public class MemStore implements Closeable {
     public KeyValue next() throws IOException {
       return it.next();
     }
+
+    @Override
+    public void seekTo(KeyValue kv) throws IOException {
+      it = sortedMap.tailMap(kv).values().iterator();
+    }
   }
 
-  private class MemStoreIter implements Iter<KeyValue> {
+  private class MemStoreIter implements SeekIter<KeyValue> {
 
     private MultiIter it;
 
     public MemStoreIter(NavigableMap<KeyValue, KeyValue> kvSet,
-        NavigableMap<KeyValue, KeyValue> snapshot) throws IOException {
+                        NavigableMap<KeyValue, KeyValue> snapshot) throws IOException {
       List<IteratorWrapper> inputs = new ArrayList<>();
       if (kvSet != null && kvSet.size() > 0) {
-        inputs.add(new IteratorWrapper(kvSet.values().iterator()));
+        inputs.add(new IteratorWrapper(kvMap));
       }
       if (snapshot != null && snapshot.size() > 0) {
-        inputs.add(new IteratorWrapper(snapshot.values().iterator()));
+        inputs.add(new IteratorWrapper(snapshot));
       }
       it = new MultiIter(inputs.toArray(new IteratorWrapper[0]));
     }
@@ -169,6 +177,11 @@ public class MemStore implements Closeable {
     @Override
     public KeyValue next() throws IOException {
       return it.next();
+    }
+
+    @Override
+    public void seekTo(KeyValue kv) throws IOException {
+      it.seekTo(kv);
     }
   }
 }
