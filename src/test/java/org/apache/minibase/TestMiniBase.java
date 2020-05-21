@@ -62,7 +62,7 @@ public class TestMiniBase {
 
   }
 
-  @Test //有Test注解可以在不编写main函数的情况下run一个.java源文件或在这个源文件的某个函数
+  @Test //有Test注解可以在不编写main函数的情况下run一个.java源文件或这个源文件的某个函数
   public void testPut() throws IOException, InterruptedException {
     // Set maxMemstoreSize to 64B, which make the memstore flush frequently.
     Config conf = new Config().setDataDir(dataDir).setMaxMemstoreSize(1).setFlushMaxRetries(1)
