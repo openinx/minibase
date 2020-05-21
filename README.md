@@ -21,7 +21,7 @@ db.put(Bytes.toBytes(1), Bytes.toBytes(1));
 // Scan
 Iter<KeyValue> kv = db.scan();
 while (kv.hasNext()) {
-    KeyValue kv = kv.next();
+    KeyValue expected = kv.next();
     //...
 }
 ```
