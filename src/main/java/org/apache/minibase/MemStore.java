@@ -22,7 +22,7 @@ public class MemStore implements Closeable {
 
   private static final Logger LOG = Logger.getLogger(MemStore.class);
 
-  private final AtomicLong dataSize = new AtomicLong();
+  private final AtomicLong dataSize = new AtomicLong(); //dataSize为MemStore当前占用字节数
 
   private volatile ConcurrentSkipListMap<KeyValue, KeyValue> kvMap;
   private volatile ConcurrentSkipListMap<KeyValue, KeyValue> snapshot;

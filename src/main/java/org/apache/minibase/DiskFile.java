@@ -306,6 +306,7 @@ public class DiskFile implements Closeable {
     private BlockIndexWriter indexWriter;
     private BlockWriter currentWriter;
     private FileOutputStream out;
+    private RandomAccessFile in;//这一行代码原作者胡争大神忘了，我补上
 
     private long fileSize = 0;
     private int blockCount = 0;
